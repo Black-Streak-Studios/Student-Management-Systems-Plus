@@ -1,0 +1,236 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    logback.xml â€” Logback Configuration
+    =====================================
+    WHY THIS FILE EXISTS:
+    SLF4J is the logging abstraction used throughout the application.
+    Logback is the runtime implementation. This file tells Logback:
+      - WHERE to write logs (console, rolling file)
+      - WHAT format to use
+      - WHICH log levels apply to which packages
+      - HOW to rotate and archive log files
+
+    LOCATION: src/main/resources/logback.xml
+    Logback automatically discovers this file on the classpath at startup.
+    No code configuration is needed.
+
+    LOG FILE LOCATION:
+    Logs are written to the same AppData directory as the database:
+      C:\Users\<user>\AppData\Roaming\SMS_Plus\logs\sms_plus.log
+    This keeps all application data in one place and avoids writing
+    to the working directory (which may be read-only on some Windows
+    installations).
+
+    ROLLING POLICY:
+    We use SizeAndTimeBasedRollingPolicy so that:
+      - A new log file is started each day (daily rollover)
+      - Any single file is capped at 10MB (size cap)
+      - Only the last 30 days of logs are kept (history cap)
+      - Total log storage never exceeds 100MB
+    This is production-appropriate behaviour for a desktop app.
+-->
+
+<configuration>
+
+    <!-- =========================================================
+         PROPERTIES
+         Define reusable values to avoid repetition.
+         ========================================================= -->
+
+    <!--
+        LOG_DIR: Where log files are stored.
+        We read APPDATA from the environment (set by Windows).
+        Falls back to user.home for dev/test on non-Windows systems.
+    -->
+    <property name="LOG_DIR"
+              value="${APPDATA:-${user.home}}/SMS_Plus/logs"/>
+
+    <!-- LOG_FILE: Base name for the rolling log file. -->
+    <property name="LOG_FILE" value="${LOG_DIR}/sms_plus"/>
+
+    <!--
+        CONSOLE_PATTERN:
+        %d{HH:mm:ss.SSS}  â€” time of day to millisecond
+        %-5level           â€” log level left-padded to 5 chars (e.g., "WARN ")
+        [%thread]          â€” thread name (important for background Task logging)
+        %logger{36}        â€” logger name truncated to 36 chars
+        - %msg             â€” the actual log message
+        %n                 â€” platform line separator
+
+        WHY include thread name: JavaFX background Tasks run on worker
+        threads. Seeing "[JavaFX Application Thread]" vs "[pool-1-thread-1]"
+        immediately tells us whether a log line came from the UI or a
+        background operation â€” invaluable for debugging concurrency issues.
+    -->
+    <property name="CONSOLE_PATTERN"
+              value="%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"/>
+
+    <!--
+        FILE_PATTERN:
+        Same as console but with full date for log file context.
+        Also includes the class and line number (%logger{0}:%line)
+        for precise source location â€” more detailed than console
+        output to aid post-hoc debugging without attaching a debugger.
+    -->
+    <property name="FILE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{50}:%line - %msg%n"/>
+
+    <!-- =========================================================
+         APPENDERS
+         An appender is a destination for log output.
+         We configure two: console (for development) and file (for production).
+         ========================================================= -->
+
+    <!--
+        APPENDER: CONSOLE
+        Writes coloured log output to System.out.
+        Uses the shorter CONSOLE_PATTERN for readability during development.
+        Level filter: DEBUG and above (INFO, WARN, ERROR also pass through).
+    -->
+    <appender name="CONSOLE"
+              class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <!--
+            ThresholdFilter: Only log DEBUG and above to console.
+            TRACE is excluded â€” it's too verbose for normal development.
+        -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>DEBUG</level>
+        </filter>
+    </appender>
+
+    <!--
+        APPENDER: ROLLING_FILE
+        Writes to a rolling log file in the user's AppData directory.
+
+        SizeAndTimeBasedRollingPolicy:
+          - fileNamePattern: archived files include date and index number
+            (e.g., sms_plus.2025-01-15.0.log.gz)
+          - maxFileSize: 10MB per file before rolling over within a day
+          - maxHistory: keep 30 days of archived log files
+          - totalSizeCap: hard cap of 100MB total across all archived files
+
+        WHY gz compression: Archived log files are compressed automatically,
+        saving significant disk space (text logs compress ~10:1).
+    -->
+    <appender name="ROLLING_FILE"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+
+        <!-- Current (active) log file â€” always this path while running -->
+        <file>${LOG_FILE}.log</file>
+
+        <rollingPolicy
+            class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- Archived file naming: date + index in the filename -->
+            <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>100MB</totalSizeCap>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+
+        <!--
+            ImmediateFlush: true means each log line is flushed to disk
+            immediately. Slightly less performant but ensures no log lines
+            are lost if the application crashes unexpectedly.
+        -->
+        <immediateFlush>true</immediateFlush>
+    </appender>
+
+    <!-- =========================================================
+         ASYNC APPENDER (wraps ROLLING_FILE)
+         Writing to disk on the application thread would block the
+         JavaFX UI thread if a burst of log messages occurs during
+         a heavy operation (e.g., importing 1000 CSV rows).
+
+         AsyncAppender offloads file I/O to a dedicated background
+         thread with a queue of 512 entries. The application thread
+         returns immediately after enqueuing the log event.
+
+         discardingThreshold=0: Do NOT drop WARN/ERROR events even
+         when the queue is 80% full (default behaviour discards them).
+         This is important â€” we never want to lose warning or error logs.
+         ========================================================= -->
+    <appender name="ASYNC_FILE"
+              class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="ROLLING_FILE"/>
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>true</includeCallerData>
+    </appender>
+
+    <!-- =========================================================
+         LOGGER CONFIGURATION
+         Fine-grained control over log levels per package.
+         ========================================================= -->
+
+    <!--
+        Our application packages: DEBUG level.
+        We want to see debug output from our own code during development.
+        In a production release, change these to INFO.
+    -->
+    <logger name="com.nana.sms" level="DEBUG" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+    </logger>
+
+    <!--
+        SQLite JDBC driver: INFO level.
+        The driver produces verbose DEBUG output about connection
+        negotiation that is not useful in day-to-day operation.
+    -->
+    <logger name="org.sqlite" level="INFO" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+    </logger>
+
+    <!--
+        JavaFX internals: WARN level only.
+        JavaFX logs many INFO messages about CSS loading, font metrics,
+        and rendering pipeline that are not relevant to application logic.
+        We only want to see warnings and errors from JavaFX itself.
+    -->
+    <logger name="javafx" level="WARN" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+    </logger>
+
+    <!--
+        com.sun (JavaFX internal implementation classes):
+        Same as above â€” suppress routine INFO noise.
+    -->
+    <logger name="com.sun" level="WARN" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+    </logger>
+
+    <!-- =========================================================
+         ROOT LOGGER
+         Catches everything not matched by a specific <logger> above.
+         Set to INFO to avoid flooding logs with DEBUG output from
+         third-party libraries we haven't explicitly configured.
+         ========================================================= -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+    </root>
+
+    <!--
+        STATUS LISTENER:
+        Prints Logback's own internal status messages (startup,
+        configuration errors) to System.err at WARN level.
+        Helps diagnose "why aren't my logs appearing?" issues.
+    -->
+    <statusListener
+        class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
+
+</configuration>
+
