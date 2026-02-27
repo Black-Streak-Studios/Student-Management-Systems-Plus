@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * StudentServiceImpl â€” Service Layer Concrete Implementation
+ * StudentServiceImpl — Service Layer Concrete Implementation
  *
  * <p>WHY THIS CLASS EXISTS:
  * This class is the single home for ALL business logic in the application.
@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
  *
  * <p>DEPENDENCY INJECTION:
  * The repository is injected via the constructor rather than instantiated
- * here. This is the Dependency Inversion Principle applied â€” the service
+ * here. This is the Dependency Inversion Principle applied — the service
  * depends on the {@link StudentRepository} abstraction, not on
  * {@code SqliteStudentRepository}. This makes unit testing with a mock
  * repository trivial.
@@ -63,16 +63,15 @@ public class StudentServiceImpl implements StudentService {
     );
 
     /**
-     * Student ID format: 3 uppercase letters, hyphen, 4 digits, hyphen,
-     * 3+ digits. Example: "STU-2024-001".
-     * Enforcing a format prevents garbage IDs from entering the system.
+     * Student ID: must not be blank and must not exceed 50 characters.
+     * No format is enforced — institutions worldwide use different schemes
+     * (e.g. "20241001", "S/2024/0042", "GH-UG-0023", "2024-CS-042").
+     * Uniqueness is still enforced at the database level.
      */
-    private static final Pattern STUDENT_ID_PATTERN = Pattern.compile(
-            "^[A-Z]{2,5}-\\d{4}-\\d{3,}$"
-    );
+    private static final int STUDENT_ID_MAX_LENGTH = 50;
 
     /**
-     * Phone: optional field, but if provided must be 7â€“15 digits,
+     * Phone: optional field, but if provided must be 7–15 digits,
      * optionally prefixed with + and containing spaces, dashes, or parens.
      */
     private static final Pattern PHONE_PATTERN = Pattern.compile(
@@ -103,7 +102,7 @@ public class StudentServiceImpl implements StudentService {
 
     /**
      * The repository this service delegates all persistence operations to.
-     * Injected via constructor â€” never instantiated here.
+     * Injected via constructor — never instantiated here.
      */
     private final StudentRepository repository;
 
@@ -116,7 +115,7 @@ public class StudentServiceImpl implements StudentService {
      *
      * <p>Constructor injection is used rather than setter injection because
      * it makes the dependency mandatory and the object immediately usable
-     * after construction â€” there is no partially-initialised state.
+     * after construction — there is no partially-initialised state.
      *
      * @param repository the repository to delegate persistence to;
      *                   must not be null
@@ -207,7 +206,7 @@ public class StudentServiceImpl implements StudentService {
         // Collect field-level errors
         Map<String, String> errors = validateStudentFields(student, true);
 
-        // Uniqueness check â€” exclude own record
+        // Uniqueness check — exclude own record
         if (!errors.containsKey("studentId")) {
             repository.findByStudentId(student.getStudentId())
                     .filter(existing -> existing.getId() != student.getId())
@@ -400,7 +399,7 @@ public class StudentServiceImpl implements StudentService {
 
     /**
      * Validates all fields of a {@link Student} object and returns a map
-     * of field name â†’ error message for every field that fails.
+     * of field name → error message for every field that fails.
      *
      * <p>Returns an empty map if all fields are valid.
      *
@@ -455,9 +454,23 @@ public class StudentServiceImpl implements StudentService {
      * <p>Rules:
      * <ul>
      *   <li>Must not be blank.</li>
-     *   <li>Must match the pattern: 2â€“5 uppercase letters, hyphen,
+     *   <li>Must match the pattern: 2–5 uppercase letters, hyphen,
      *       4 digits, hyphen, 3+ digits (e.g., "STU-2024-001").</li>
      * </ul>
+     *
+     * @param studentId the value to validate
+     * @param errors    the error map to add to on failure
+     */
+    /**
+     * Validates the student ID field.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>Must not be blank.</li>
+     *   <li>Must not exceed {@link #STUDENT_ID_MAX_LENGTH} characters.</li>
+     * </ul>
+     * No format is enforced — any non-blank value up to 50 characters
+     * is accepted to accommodate all international ID schemes.
      *
      * @param studentId the value to validate
      * @param errors    the error map to add to on failure
@@ -467,10 +480,10 @@ public class StudentServiceImpl implements StudentService {
             errors.put("studentId", "Student ID must not be blank.");
             return;
         }
-        if (!STUDENT_ID_PATTERN.matcher(studentId).matches()) {
+        if (studentId.length() > STUDENT_ID_MAX_LENGTH) {
             errors.put("studentId",
-                    "Student ID must match format: XXX-YYYY-NNN " +
-                    "(e.g., STU-2024-001). Got: '" + studentId + "'.");
+                    "Student ID must not exceed " + STUDENT_ID_MAX_LENGTH
+                    + " characters. Got: " + studentId.length() + ".");
         }
     }
 
@@ -532,7 +545,7 @@ public class StudentServiceImpl implements StudentService {
     /**
      * Validates the phone field (optional).
      *
-     * <p>Phone is not required â€” an empty or null value is valid.
+     * <p>Phone is not required — an empty or null value is valid.
      * If provided, it must match {@link #PHONE_PATTERN}.
      *
      * @param phone  the phone value to validate (may be null or blank)
@@ -606,4 +619,3 @@ public class StudentServiceImpl implements StudentService {
         }
     }
 }
-
